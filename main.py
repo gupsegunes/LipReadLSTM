@@ -10,7 +10,7 @@ from datetime import datetime
 #from tensorflow import keras
 import keras
 from keras.utils import to_categorical
-from utils import wordCount,getFolderNamesInRootDir,wordArray
+from utils import wordCount,getFolderNamesInRootDir,wordArray,words
 import os
 from sklearn.metrics import confusion_matrix
 from sklearn.utils.multiclass import unique_labels
@@ -197,33 +197,64 @@ def create_bottleneck_model(x_train, y_train, x_test, y_test, x_val, y_val):
 	bottleneck_test_path = 'bottleneck_features_test_seen.npy'
 	bottleneck_train_labels_path = 'bottleneck_features_train_labels_seen.npy'
 
-	if not os.path.exists(bottleneck_train_path):
+	#if not os.path.exists(bottleneck_train_path):
 		#self.DataAugmentation()
-		input_layer = keras.layers.Input(shape=(29, 48, 48, 3))
-		# build the VGG16 network
-		vgg_base = VGGFace(weights='vggface', include_top=False, input_shape=(48, 48, 3))
-		#vgg_base = VGG16(weights='imagenet', include_top=False, input_shape=(self.config.MAX_WIDTH, self.config.MAX_HEIGHT, 3))
-		vgg = Model(inputs=vgg_base.input, outputs=vgg_base.output)
-		#vgg.trainable = False
-		for layer in vgg.layers[:15]:
-			layer.trainable = False
-		x = TimeDistributed(vgg)(input_layer)
-		bottleneck_model = Model(inputs=input_layer, outputs=x)
-		if not os.path.exists(bottleneck_train_path):
-			#bottleneck_features_train = bottleneck_model.predict_generator(self.training_generator(), steps=np.shape(self.X_train)[0] / self.config.batch_size)
-			bottleneck_features_train = bottleneck_model.predict(x_train)
-			np.save(bottleneck_train_path, bottleneck_features_train)
-		if not os.path.exists(bottleneck_val_path):
-			bottleneck_features_val = bottleneck_model.predict(x_val)
-			np.save(bottleneck_val_path, bottleneck_features_val)
-		if not os.path.exists(bottleneck_test_path):
-			bottleneck_features_test = bottleneck_model.predict(x__test)
-			np.save(bottleneck_test_path, bottleneck_features_test)
-		if not os.path.exists(bottleneck_train_labels_path):
-			np.save(bottleneck_train_labels_path, y_train)
+	input_layer = keras.layers.Input(shape=(29, 48, 48, 3))
+	# build the VGG16 network
+	vgg_base = VGGFace(weights='vggface', include_top=False, input_shape=(48, 48, 3))
+	#vgg_base = VGG16(weights='imagenet', include_top=False, input_shape=(self.config.MAX_WIDTH, self.config.MAX_HEIGHT, 3))
+	vgg = Model(inputs=vgg_base.input, outputs=vgg_base.output)
+	#vgg.trainable = False
+	for layer in vgg.layers[:15]:
+		layer.trainable = False
+	x = TimeDistributed(vgg)(input_layer)
+	bottleneck_model = Model(inputs=input_layer, outputs=x)
+	if not os.path.exists(bottleneck_train_path):
+		#bottleneck_features_train = bottleneck_model.predict_generator(self.training_generator(), steps=np.shape(self.X_train)[0] / self.config.batch_size)
+		bottleneck_features_train = bottleneck_model.predict(x_train)
+		np.save(bottleneck_train_path, bottleneck_features_train)
+	if not os.path.exists(bottleneck_val_path):
+		bottleneck_features_val = bottleneck_model.predict(x_val)
+		np.save(bottleneck_val_path, bottleneck_features_val)
+	if not os.path.exists(bottleneck_test_path):
+		bottleneck_features_test = bottleneck_model.predict(x_test)
+		np.save(bottleneck_test_path, bottleneck_features_test)
+	if not os.path.exists(bottleneck_train_labels_path):
+		np.save(bottleneck_train_labels_path, y_train)
 
-		bottleneck_model.summary()
-		plot_model(bottleneck_model, to_file='bottleneck_model_plot.png', show_shapes=True, show_layer_names=True)
+	bottleneck_model.summary()
+	plot_model(bottleneck_model, to_file='bottleneck_model_plot.png', show_shapes=True, show_layer_names=True)
+
+def create_model(wordCount, ne, msl, bs, lr, dp,train_data,test_data,val_data, train_data_label,y_test,y_val,y_train):
+	np.random.seed(0)
+	model = Sequential()
+	model.add(TimeDistributed(Flatten(),input_shape=train_data.shape[1:]))
+	lstm = keras.layers.recurrent.LSTM(256)
+	model.add(keras.layers.wrappers.Bidirectional(lstm, merge_mode='concat', weights=None))
+	#model.add(BatchNormalization())
+	#model.add(BatchNormalization(momentum=0.99, epsilon=0.001))
+
+	model.add(keras.layers.core.Dropout(rate=dp))
+	model.add(keras.layers.core.Dense(wordCount))
+	model.add(keras.layers.core.Activation('softmax'))
+	adam = keras.optimizers.Adam(lr=lr)#, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0)
+	model.compile(optimizer=adam, loss='categorical_crossentropy', metrics=['accuracy'])
+	one_hot_labels_val = keras.utils.to_categorical(y_val, num_classes=wordCount)
+	one_hot_labels_test = keras.utils.to_categorical(y_test, num_classes=wordCount)
+	one_hot_labels_train = keras.utils.to_categorical(train_data_label, num_classes=wordCount)
+	print('Fitting the model...')
+	self.config.class_names = np.array(words)
+	self.iteration += 1
+
+	fileName = 'csv/epoch_{0}.log'.format(self.iteration)
+
+	csv_logger = keras.callbacks.CSVLogger(fileName, separator=',', append=True)
+	#self.plot_confusion_matrix(self.y_test, y_pred,  title='Confusion matrix, without normalization')
+	model.summary()
+	plot_model(model, to_file='model_plot.png', show_shapes=True, show_layer_names=True)
+	history = model.fit(train_data, one_hot_labels_train, epochs=ne, batch_size=bs,validation_data=(self.val_data, one_hot_labels_val),callbacks=[csv_logger])
+	create_save_plots(history,model,train_data, y_train, test_data,y_test, val_data,y_val,one_hot_labels_train,one_hot_labels_test,one_hot_labels_val)
+	evaluate_model(model,test_data, one_hot_labels_test,val_data,one_hot_labels_val)
 
 def run_task():
 	getFolderNamesInRootDir()
@@ -250,16 +281,39 @@ def run_task():
 	y_train_one_hot_label = to_categorical(y_train, wordCount)
 	y_test_one_hot_label = to_categorical(y_test, wordCount)
 	y_val_one_hot_label = to_categorical(y_val, wordCount)
-	'''
+	
 
 	y_train_one_hot_label = np.expand_dims(y_train_one_hot_label, axis=2)
 	y_test_one_hot_label = np.expand_dims(y_test_one_hot_label, axis=2)
 	y_val_one_hot_label = np.expand_dims(y_val_one_hot_label, axis=2)
-	
+	'''
 	x_train = x_train.reshape(x_train.shape[0], 29,48,48,3)
 	x_test = x_test.reshape(x_test.shape[0], 29,48,48,3)
 	x_val = x_val.reshape(x_val.shape[0], 29,48,48,3)
 	create_bottleneck_model(x_train, y_train, x_test, y_test, x_val, y_val)
+
+	bottleneck_train_path = 'bottleneck_features_train_seen.npy'
+	bottleneck_val_path = 'bottleneck_features_val_seen.npy'
+	bottleneck_test_path = 'bottleneck_features_test_seen.npy'
+	bottleneck_train_labels_path = 'bottleneck_features_train_labels_seen.npy'
+
+	train_data = np.load(bottleneck_train_path)
+	val_data = np.load(bottleneck_val_path)	
+	test_data = np.load(bottleneck_test_path)
+	train_data_label= np.load(bottleneck_train_labels_path)
+
+	num_epochs = [35]#10
+	learning_rates = [0.0001, 0.0002, 0.0005]
+	#learning_rates = [0.0005]
+	batch_size = [64]
+	dropout_ = [ 0.1, 0.3,0.5]
+	#dropout_ = [ 0.4]
+	for ne in num_epochs:
+		for bs in batch_size: 
+			for lr in learning_rates:
+				for dp in dropout_:
+					print("Epochs: {0} Batch Size:{1}  Learning Rate: {2} Dropout {3}".format(ne, bs, lr, dp))
+					create_model (wordCount,ne,29, bs, lr, dp,train_data,test_data,val_data, train_data_label,y_test,y_val,y_train)
 	'''
 	#TCN test
 	#new model
