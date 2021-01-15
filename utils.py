@@ -4,9 +4,9 @@ from keras.utils import to_categorical
 import cv2
 import os
 
-walk_dir = "../../../lip_reading/data"
+walk_dir = "../lip_reading/data"
 wordArray = []
-words =['ABOUT','ABSOLUTELY','ABUSE','ACCESS','ACCORDING']
+words =['ABOUT','ALREADY','COMES','EVENTS','LEGAL']
 datasets = ['train','test','val']
 wordCount = 5
 def getFolderNamesInRootDir():

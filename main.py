@@ -3,12 +3,11 @@ import numpy as np
 from tcn import compiled_tcn
 import matplotlib
 matplotlib.use('Agg')
+from tensorflow import keras
 import matplotlib.pyplot as plt
 from tensorflow.keras.utils import plot_model
 from datetime import datetime
-#import tensorflow as tf
-#from tensorflow import keras
-import keras
+
 from keras.utils import to_categorical
 from utils import wordCount,getFolderNamesInRootDir,wordArray,words
 import os
@@ -16,21 +15,21 @@ from sklearn.metrics import confusion_matrix
 from sklearn.utils.multiclass import unique_labels
 from sklearn.preprocessing import LabelBinarizer
 from tensorflow.keras import Sequential
-from keras.layers import Dense,Conv2D, Flatten, MaxPooling2D, Dropout
+from keras.layers import Dense,Conv2D, Flatten, MaxPooling2D, Dropout, Activation, TimeDistributed
 from tcn import TCN
-from keras.applications.vgg19 import VGG19
-from keras.applications.vgg16 import VGG16
+from tensorflow.keras.applications.vgg19 import VGG19
+from tensorflow.keras.applications.vgg16 import VGG16
 from keras_vggface.vggface import VGGFace
-from keras.models import Model
-from keras.layers.wrappers import TimeDistributed
-from keras.preprocessing.image import ImageDataGenerator
-from keras import optimizers
-from keras import backend as K
-from keras.applications.mobilenet import MobileNet
-from keras import applications
-from keras.optimizers import Nadam
-from keras.layers.pooling import GlobalAveragePooling2D
-from keras.layers.recurrent import LSTM
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import TimeDistributed
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from tensorflow.keras import optimizers
+from tensorflow.keras import backend as K
+from tensorflow.keras.applications.mobilenet import MobileNet
+from tensorflow.keras import applications
+from tensorflow.keras.optimizers import Nadam, Adam
+from tensorflow.keras.layers import GlobalAveragePooling2D
+from tensorflow.keras.layers import LSTM, Bidirectional
 
 x_train = None
 y_train = None
@@ -70,21 +69,26 @@ def evaluate_model(model,x_test, y_test,x_val,y_val):
 	print('Finished training, with the following val score:')
 	print(score)
 
-def create_save_plots(history,model,x_train, y_train, x_test,y_test, x_val,y_val,y_train_one_hot_label,y_test_one_hot_label,y_val_one_hot_label):
+def create_save_plots(history,model,x_train, y_train, x_test,y_test, x_val,y_val):
 	create_plots(history)
-	plot_and_save_cm(model,x_train, y_train, x_test,y_test, x_val,y_val,y_train_one_hot_label,y_test_one_hot_label,y_val_one_hot_label)
+	plot_and_save_cm(model,x_train, y_train, x_test,y_test, x_val,y_val)
 
-def plot_and_save_cm(model,x_train, y_train, x_test,y_test, x_val,y_val,y_train_one_hot_label,y_test_one_hot_label,y_val_one_hot_label):
+def plot_and_save_cm(model,x_train, y_train, x_test,y_test, x_val,y_val):
+	encoder = LabelBinarizer()
+	y_test_one_hot_label = encoder.fit_transform(y_test)
+	y_val_one_hot_label = encoder.fit_transform(y_val)
+	y_test_one_hot_label = np.expand_dims(y_test_one_hot_label, axis=2).squeeze().argmax(axis=1)
+	y_val_one_hot_label = np.expand_dims(y_val_one_hot_label, axis=2).squeeze().argmax(axis=1)
 	now = datetime.now()
 	fileName = 'plots/conf_matrix_test_{0}.png'.format(now.strftime("%d_%m_%Y_%H%M%S"))
 	y_pred = model.predict(x_test, verbose=1)
 	y_pred_one_hot_label = y_pred.argmax(axis=1)
-	plot_confusion_matrix(y_test_one_hot_label.squeeze(), y_pred_one_hot_label, classes=class_names,fileName=fileName)
+	plot_confusion_matrix(y_test_one_hot_label, y_pred_one_hot_label, classes=class_names,fileName=fileName)
 
 	fileName = 'plots/conf_matrix_val_{0}.png'.format(now.strftime("%d_%m_%Y_%H%M%S"))
 	y_pred = model.predict(x_val, verbose=1)
 	y_pred_one_hot_label = y_pred.argmax(axis=1)
-	plot_confusion_matrix(y_val_one_hot_label.squeeze(), y_pred_one_hot_label, classes=class_names,fileName=fileName)
+	plot_confusion_matrix(y_val_one_hot_label, y_pred_one_hot_label, classes=class_names,fileName=fileName)
 
 def create_plots(history):
 	if not os.path.exists('plots'):
@@ -225,36 +229,45 @@ def create_bottleneck_model(x_train, y_train, x_test, y_test, x_val, y_val):
 	bottleneck_model.summary()
 	plot_model(bottleneck_model, to_file='bottleneck_model_plot.png', show_shapes=True, show_layer_names=True)
 
-def create_model(wordCount, ne, msl, bs, lr, dp,train_data,test_data,val_data, train_data_label,y_test,y_val,y_train):
+def create_model(wordCount, ne, msl, bs, lr, dp,train_data,test_data,val_data,y_train,y_test,y_val,one_hot_labels_train,one_hot_labels_test,one_hot_labels_val,iteration):
 	np.random.seed(0)
+	'''
+	one_hot_labels_val = keras.utils.to_categorical(y_val, num_classes=wordCount)
+	one_hot_labels_test = keras.utils.to_categorical(y_test, num_classes=wordCount)
+	one_hot_labels_train = keras.utils.to_categorical(y_train, num_classes=wordCount)
+	'''
 	model = Sequential()
 	model.add(TimeDistributed(Flatten(),input_shape=train_data.shape[1:]))
-	lstm = keras.layers.recurrent.LSTM(256)
-	model.add(keras.layers.wrappers.Bidirectional(lstm, merge_mode='concat', weights=None))
+	lstm1 = LSTM(32,return_sequences=True)
+	lstm2 = LSTM(32,return_sequences=True)
+
+	'''
+	model.add(Bidirectional(lstm1, merge_mode='concat', weights=None))
+	model.add(Bidirectional(lstm2))
+	'''
+	model.add(TCN(nb_filters=64,kernel_size=5,dilations=[1,2,4,8,16,32,64] ,use_batch_norm= True,use_skip_connections=True))
 	#model.add(BatchNormalization())
 	#model.add(BatchNormalization(momentum=0.99, epsilon=0.001))
 
-	model.add(keras.layers.core.Dropout(rate=dp))
-	model.add(keras.layers.core.Dense(wordCount))
-	model.add(keras.layers.core.Activation('softmax'))
-	adam = keras.optimizers.Adam(lr=lr)#, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0)
+	model.add(Dropout(rate=dp))
+	model.add(Dense(wordCount))
+	model.add(Activation('softmax'))
+	adam = Adam(lr=lr)#, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0)
 	model.compile(optimizer=adam, loss='categorical_crossentropy', metrics=['accuracy'])
-	one_hot_labels_val = keras.utils.to_categorical(y_val, num_classes=wordCount)
-	one_hot_labels_test = keras.utils.to_categorical(y_test, num_classes=wordCount)
-	one_hot_labels_train = keras.utils.to_categorical(train_data_label, num_classes=wordCount)
-	print('Fitting the model...')
-	self.config.class_names = np.array(words)
-	self.iteration += 1
 
-	fileName = 'csv/epoch_{0}.log'.format(self.iteration)
+	print('Fitting the model...')
+	class_names = np.array(words)
+	iteration += 1
+
+	fileName = 'csv/epoch_{0}.log'.format(iteration)
 
 	csv_logger = keras.callbacks.CSVLogger(fileName, separator=',', append=True)
 	#self.plot_confusion_matrix(self.y_test, y_pred,  title='Confusion matrix, without normalization')
 	model.summary()
 	plot_model(model, to_file='model_plot.png', show_shapes=True, show_layer_names=True)
-	history = model.fit(train_data, one_hot_labels_train, epochs=ne, batch_size=bs,validation_data=(self.val_data, one_hot_labels_val),callbacks=[csv_logger])
-	create_save_plots(history,model,train_data, y_train, test_data,y_test, val_data,y_val,one_hot_labels_train,one_hot_labels_test,one_hot_labels_val)
-	evaluate_model(model,test_data, one_hot_labels_test,val_data,one_hot_labels_val)
+	history = model.fit(train_data, one_hot_labels_train, epochs=ne, batch_size=bs,validation_data=(val_data, one_hot_labels_val),callbacks=[csv_logger])
+	create_save_plots(history,model,train_data, y_train, test_data,y_test, val_data,y_val)
+	evaluate_model(model,test_data, y_test_one_hot_label,val_data,y_val_one_hot_label)
 
 def run_task():
 	getFolderNamesInRootDir()
@@ -271,26 +284,35 @@ def run_task():
 	y_test = np.load('y_test.npy')
 	
 
-
+	
 	encoder = LabelBinarizer()
 	y_train_one_hot_label = encoder.fit_transform(y_train)
 	y_test_one_hot_label = encoder.fit_transform(y_test)
 	y_val_one_hot_label = encoder.fit_transform(y_val)
 	print(y_test_one_hot_label)
+	
 	'''
 	y_train_one_hot_label = to_categorical(y_train, wordCount)
 	y_test_one_hot_label = to_categorical(y_test, wordCount)
 	y_val_one_hot_label = to_categorical(y_val, wordCount)
 	
-
+	
 	y_train_one_hot_label = np.expand_dims(y_train_one_hot_label, axis=2)
 	y_test_one_hot_label = np.expand_dims(y_test_one_hot_label, axis=2)
 	y_val_one_hot_label = np.expand_dims(y_val_one_hot_label, axis=2)
 	'''
+	one_hot_labels_train = np.expand_dims(y_train_one_hot_label, axis=2).squeeze().argmax(axis=1)
+	one_hot_labels_test = np.expand_dims(y_test_one_hot_label, axis=2).squeeze().argmax(axis=1)
+	one_hot_labels_val = np.expand_dims(y_val_one_hot_label, axis=2).squeeze().argmax(axis=1)
+	'''
+	one_hot_labels_val = keras.utils.to_categorical(y_val_one_hot_label, num_classes=wordCount)
+	one_hot_labels_test = keras.utils.to_categorical(y_test_one_hot_label, num_classes=wordCount)
+	one_hot_labels_train = keras.utils.to_categorical(y_train_one_hot_label, num_classes=wordCount)
+	'''
 	x_train = x_train.reshape(x_train.shape[0], 29,48,48,3)
 	x_test = x_test.reshape(x_test.shape[0], 29,48,48,3)
 	x_val = x_val.reshape(x_val.shape[0], 29,48,48,3)
-	create_bottleneck_model(x_train, y_train, x_test, y_test, x_val, y_val)
+	create_bottleneck_model(x_train, one_hot_labels_train, x_test, one_hot_labels_test, x_val, one_hot_labels_val)
 
 	bottleneck_train_path = 'bottleneck_features_train_seen.npy'
 	bottleneck_val_path = 'bottleneck_features_val_seen.npy'
@@ -302,18 +324,19 @@ def run_task():
 	test_data = np.load(bottleneck_test_path)
 	train_data_label= np.load(bottleneck_train_labels_path)
 
-	num_epochs = [35]#10
-	learning_rates = [0.0001, 0.0002, 0.0005]
+	num_epochs = [40]#10
+	learning_rates = [0.001, 0.002, 0.005]
 	#learning_rates = [0.0005]
 	batch_size = [64]
-	dropout_ = [ 0.1, 0.3,0.5]
+	dropout_ = [ 0.3, 0.5,0.7]
 	#dropout_ = [ 0.4]
+	iteration = 0
 	for ne in num_epochs:
 		for bs in batch_size: 
 			for lr in learning_rates:
 				for dp in dropout_:
 					print("Epochs: {0} Batch Size:{1}  Learning Rate: {2} Dropout {3}".format(ne, bs, lr, dp))
-					create_model (wordCount,ne,29, bs, lr, dp,train_data,test_data,val_data, train_data_label,y_test,y_val,y_train)
+					create_model (wordCount,ne,29, bs, lr, dp,train_data,test_data,val_data, y_train,y_test,y_val,y_train_one_hot_label,y_test_one_hot_label,y_val_one_hot_label,iteration)
 	'''
 	#TCN test
 	#new model
@@ -357,14 +380,11 @@ def run_task():
 	print(f'y_test.shape = {y_test_one_hot_label.shape}')
 
 	model.summary()
-	'''
+	
 	now = datetime.now()
 	plot_file_name = 'plots/tcn_model_plot_' + now.strftime("%d_%m_%Y_%H%M%S") + '.png'
 	plot_model(model, to_file=plot_file_name, show_shapes=True, show_layer_names=True)
-	'''
-	y_1 = y_train_one_hot_label.squeeze().argmax(axis=1)
-	y_2 = y_test_one_hot_label.squeeze().argmax(axis=1)
-	'''
+
 	y_train_one_hot_label = y_train_one_hot_label.squeeze().argmax(axis=1)
 	y_test_one_hot_label = y_test_one_hot_label.squeeze().argmax(axis=1)
 	y_val_one_hot_label = y_val_one_hot_label.squeeze().argmax(axis=1)
@@ -374,6 +394,7 @@ def run_task():
 
 	create_save_plots(history,model,x_train, y_train, x_test,y_test, x_val,y_val,y_train_one_hot_label,y_test_one_hot_label,y_val_one_hot_label)
 	evaluate_model(model,x_test,y_test_one_hot_label,x_val,y_val_one_hot_label)
+	'''
 
 
 
