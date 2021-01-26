@@ -6,7 +6,7 @@ import os
 
 walk_dir = "../lip_reading/data"
 wordArray = []
-words =['ABOUT','ALREADY','COMES','EVENTS','LEGAL']
+words =['ABOUT','ABSOLUTELY', 'ABUSE', 'ACCESS', 'ACCORDING']
 datasets = ['train','test','val']
 wordCount = 5
 def getFolderNamesInRootDir():
