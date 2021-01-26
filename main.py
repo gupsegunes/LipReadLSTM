@@ -208,10 +208,6 @@ class LipReading(object):
 	def create_bottleneck_model(self):
 		np.random.seed(0)
 
-		#train_generator = train_datagen.flow_from_directory(directory='train', class_mode='categorical', target_size=(64,64), batch_size=16, shuffle=True, classes=["dog", "cat"])
-
-		#if not os.path.exists(bottleneck_train_path):
-			#self.DataAugmentation()
 		input_layer = keras.layers.Input(shape=(29, 48, 48, 3))
 		# build the VGG16 network
 		vgg_base = VGGFace(weights='vggface', include_top=False, input_shape=(48, 48, 3))
@@ -222,6 +218,48 @@ class LipReading(object):
 			layer.trainable = False
 		x = TimeDistributed(vgg)(input_layer)
 		self.bottleneck_model = Model(inputs=input_layer, outputs=x)
+
+		#train_generator = train_datagen.flow_from_directory(directory='train', class_mode='categorical', target_size=(64,64), batch_size=16, shuffle=True, classes=["dog", "cat"])
+
+		#if not os.path.exists(bottleneck_train_path):
+			#self.DataAugmentation()
+		'''
+		train_datagen = ImageDataGenerator()
+		train_generator = train_datagen.flow_from_directory(directory='train', class_mode='categorical', target_size=(64,64), batch_size=16, shuffle=True, classes=self.class_names)
+		train_path = '../lip_reading/data'
+
+		'''
+
+		train_gen =  tf.keras.preprocessing.image_dataset_from_directory(
+			directory,
+			labels="inferred",
+			label_mode="int",
+			class_names=None,
+			color_mode="rgb",
+			batch_size=32,
+			image_size=(48, 48),
+			shuffle=True,
+			seed=None,
+			validation_split=None,
+			subset=None,
+			interpolation="bilinear",
+			follow_links=False,
+		)
+		'''
+		train_flow = train_gen.flow_from_directory(
+			train_path,
+			target_size=(256, 256),
+			batch_size=32,
+		)
+		'''
+		for xtrain, ytrain in train_gen:
+			train_tensor_neck = self.bottleneck_model.predict(xtrain)
+			train_labels = ytrain
+
+
+
+
+
 		if not os.path.exists(self.bottleneck_train_path):
 			#bottleneck_features_train = bottleneck_model.predict_generator(self.training_generator(), steps=np.shape(self.X_train)[0] / self.config.batch_size)
 			bottleneck_features_train = self.bottleneck_model.predict(self.x_train)
@@ -248,17 +286,7 @@ class LipReading(object):
 
 		np.random.seed(0)
 
-		input_layer = keras.layers.Input(shape=(29, 48, 48, 3))
-		# build the VGG16 network
-		vgg_base = VGGFace(weights='vggface', include_top=False, input_shape=(48, 48, 3))
-		#vgg_base = VGG16(weights='imagenet', include_top=False, input_shape=(self.config.MAX_WIDTH, self.config.MAX_HEIGHT, 3))
-		vgg = Model(inputs=vgg_base.input, outputs=vgg_base.output)
-		#vgg.trainable = False
-		for layer in vgg.layers[:15]:
-			layer.trainable = False
-		x = TimeDistributed(vgg)(input_layer)
-
-		self.model = Sequential(x)
+		self.model = Sequential()
 		self.model.add(TimeDistributed(Flatten(),input_shape=self.train_data.shape[1:]))
 		lstm1 = LSTM(32,return_sequences=True)
 		lstm2 = LSTM(32,return_sequences=True)
