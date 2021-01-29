@@ -7,6 +7,9 @@ from tensorflow import keras
 import matplotlib.pyplot as plt
 from tensorflow.keras.utils import plot_model
 from datetime import datetime
+import cv2
+import glob
+import dlib
 
 from keras.utils import to_categorical
 from utils import wordCount,getFolderNamesInRootDir,wordArray,words
@@ -30,6 +33,10 @@ from tensorflow.keras import applications
 from tensorflow.keras.optimizers import Nadam, Adam
 from tensorflow.keras.layers import GlobalAveragePooling2D
 from tensorflow.keras.layers import LSTM, Bidirectional
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+import tensorflow as tf
+
+from keras_video import VideoFrameGenerator
 
 class LipReading(object):
 
@@ -64,40 +71,73 @@ class LipReading(object):
 		self.val_data = None
 		self.test_data = None
 		self.train_data_label= None
-	
-
+		#initial value of stepSize
+		self.face_cascade = cv2.CascadeClassifier('../opencv/haarcascade_frontalface_default.xml')
+		self.mouth_cascade=cv2.CascadeClassifier('/Users/gupsekobas/opencv_contrib-4.0.1/modules/face/data/cascades/haarcascade_mcs_mouth.xml')
+		self.detector = dlib.get_frontal_face_detector()
+		self.predictor = dlib.shape_predictor('../opencv/shape_predictor_68_face_landmarks.dat')
+		self.xmouthpoints = []
+		self.ymouthpoints = []
+		self.image = None
+		self.count = 0
+		self.frame_dict =  {"Distance":{},"Angle":{}}
+		self.frame_dict_norm =  {"Distance":{},"Angle":{}}
+		#self.frame_dict =  {}
+		#self.frame_dict_norm =  {}
+		self.distanceArray = np.zeros(19)
+		self.angleArray = np.zeros(19)
+		self.distanceArrayNorm = np.zeros(19)
+		self.angleArrayNorm = np.zeros(19)
+		self.video_dict =  {}
+		self.wordArray= []
+		self.walk_dir = "../LRW/lipread_mp4"
+		self.datasets = ["train", "test","val"]
+		self.fileNum = None
+		self.targetDir = None
+		self.encoder = None
+		'''
+	#	(self.lStart, self.lEnd) = face_utils.FACIAL_LANDMARKS_IDXS["mouth"]
+	#	logging.basicConfig(handlers=[logging.FileHandler(filename="./log_records.txt", 
+                                                 encoding='utf-8', mode='a+')],
+                    format="%(asctime)s %(name)s:%(levelname)s:%(message)s", 
+                    datefmt="%F %A %T", 
+                    level=logging.ERROR)
+			
+		'''
 	def create_class_names(self):
 		for i in range(wordCount):
 			self.class_names.append(wordArray[i])
 
 	def evaluate_model(self):
 		print('Evaluating the model...')
-		score = self.model.evaluate(self.x_val, self.y_val, batch_size=self.batch_size)
+		score = self.model.evaluate(self.val_data, self.y_val_one_hot_label, batch_size=self.batch_size)
 		print('Finished training, with the following val score:')
 		print(score)
 		print('Evaluating the model...')
-		score = self.model.evaluate(self.x_test, self.y_test, batch_size=self.batch_size)
+		score = self.model.evaluate(self.test_data, self.y_test_one_hot_label, batch_size=self.batch_size)
 		print('Finished training, with the following val score:')
 		print(score)
 
 	def create_save_plots(self, history):
-		create_plots(history)
-		self.plot_and_save_cm(self)
+		self.create_plots(history)
+		self.plot_and_save_cm()
 
 	def plot_and_save_cm(self):
-		encoder = LabelBinarizer()
+		self.encoder = LabelBinarizer()
+		'''
 		self.y_test_one_hot_label = encoder.fit_transform(self.y_test)
 		self.y_val_one_hot_label = encoder.fit_transform(self.y_val)
 		self.y_test_one_hot_label = np.expand_dims(self.y_test_one_hot_label, axis=2).squeeze().argmax(axis=1)
 		self.y_val_one_hot_label = np.expand_dims(self.y_val_one_hot_label, axis=2).squeeze().argmax(axis=1)
+		'''
 		now = datetime.now()
 		fileName = 'plots/conf_matrix_test_{0}.png'.format(now.strftime("%d_%m_%Y_%H%M%S"))
-		self.y_pred = self.model.predict(self.x_test, verbose=1)
+		self.y_pred = self.model.predict(self.test_data, verbose=1)
 		self.y_pred_one_hot_label = self.y_pred.argmax(axis=1)
 		self.plot_confusion_matrix(fileName=fileName)
 
 		fileName = 'plots/conf_matrix_val_{0}.png'.format(now.strftime("%d_%m_%Y_%H%M%S"))
-		self.y_pred = self.model.predict(self.x_val, verbose=1)
+		self.y_pred = self.model.predict(self.val_data, verbose=1)
 		self.y_pred_one_hot_label = self.y_pred.argmax(axis=1)
 		self.plot_confusion_matrix(fileName=fileName)
 
@@ -154,9 +194,14 @@ class LipReading(object):
 		# Compute confusion matrix
 		#classes =[0,1] 
 		classes = np.array(self.class_names)
-		cm = confusion_matrix(self.y_true, self.y_pred)
+		y_test_one_hot_label = self.encoder.fit_transform(self.y_test)
+		y_val_one_hot_label = self.encoder.fit_transform(self.y_val)
+		y_test_one_hot_label = np.expand_dims(y_test_one_hot_label, axis=2).squeeze().argmax(axis=1)
+		y_val_one_hot_label = np.expand_dims(y_val_one_hot_label, axis=2).squeeze().argmax(axis=1)
+
+		cm = confusion_matrix(y_test_one_hot_label, self.y_pred_one_hot_label)
 		# Only use the labels that appear in the data
-		classes = classes[unique_labels(self.y_true, self.y_pred)]
+		classes = classes[unique_labels(y_test_one_hot_label, self.y_pred_one_hot_label)]
 		if normalize:
 			cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
 			print("Normalized confusion matrix")
@@ -205,9 +250,26 @@ class LipReading(object):
 		y_pred = y_pred[:, 2:, :]
 		return K.ctc_batch_cost(y_true, y_pred, input_length, label_length)
 
+	def bring_data_from_directory(self):
+		datagen = ImageDataGenerator()
+		train_generator = datagen.flow_from_directory(
+				'../lip_reading/data_/train',
+				target_size=(256, 256),
+				batch_size=self.batch_size,
+				class_mode='categorical',  # this means our generator will only yield batches of data, no labels
+				shuffle=True)
+
+		validation_generator = datagen.flow_from_directory(
+				'../lip_reading/data_/val',
+				target_size=(256, 256),
+				batch_size=self.batch_size,
+				class_mode='categorical',  # this means our generator will only yield batches of data, no labels
+				shuffle=True)
+		return train_generator,validation_generator
+
 	def create_bottleneck_model(self):
 		np.random.seed(0)
-
+		
 		input_layer = keras.layers.Input(shape=(29, 48, 48, 3))
 		# build the VGG16 network
 		vgg_base = VGGFace(weights='vggface', include_top=False, input_shape=(48, 48, 3))
@@ -220,44 +282,59 @@ class LipReading(object):
 		self.bottleneck_model = Model(inputs=input_layer, outputs=x)
 
 		#train_generator = train_datagen.flow_from_directory(directory='train', class_mode='categorical', target_size=(64,64), batch_size=16, shuffle=True, classes=["dog", "cat"])
-
-		#if not os.path.exists(bottleneck_train_path):
-			#self.DataAugmentation()
 		'''
-		train_datagen = ImageDataGenerator()
-		train_generator = train_datagen.flow_from_directory(directory='train', class_mode='categorical', target_size=(64,64), batch_size=16, shuffle=True, classes=self.class_names)
-		train_path = '../lip_reading/data'
+		
+		train_path = '../lip_reading/data_/train'
+		glob_pattern = "../LRW/lipread_mp4/{classname}/train/*.mp4" 
 
-		'''
+		val_path = '../lip_reading/data_/val'
+		glob_pattern_val = "../LRW/lipread_mp4/{classname}/val/*.mp4" 
 
-		train_gen =  tf.keras.preprocessing.image_dataset_from_directory(
-			directory,
-			labels="inferred",
-			label_mode="int",
-			class_names=None,
-			color_mode="rgb",
-			batch_size=32,
-			image_size=(48, 48),
-			shuffle=True,
-			seed=None,
-			validation_split=None,
-			subset=None,
-			interpolation="bilinear",
-			follow_links=False,
+		classes =[i.split(os.path.sep)[1] for i in glob.glob(train_path)] 
+		classes.sort()
+
+		train_gen = ImageDataGenerator()
+		val_gen = ImageDataGenerator()
+		#	train_gen = TimeDistributedImageDataGenerator.TimeDistributedImageDataGenerator(time_steps = 29)
+		
+		train = VideoFrameGenerator(
+			classes= classes,
+			glob_pattern=glob_pattern,
+			nb_frames= 29,
+			batch_size=8,
+			target_shape= (256,256),
+			use_frame_cache= False
+
 		)
-		'''
+
+		val = VideoFrameGenerator(
+			classes= classes,
+			glob_pattern=glob_pattern_val,
+			nb_frames= 29,
+			batch_size=8,
+			target_shape= (256,256),
+			use_frame_cache=False
+
+		)
+		train_tensor_neck = self.bottleneck_model.predict_generator(train,verbose=1)
+	#	train_tensor_neck = self.bottleneck_model.fit_generator(train,validation_data=val,verbose=1)
+	#	train_labels = ytrain
+
+		
+	#	train_path = train_path + '/' + x + '/train'
 		train_flow = train_gen.flow_from_directory(
 			train_path,
-			target_size=(256, 256),
-			batch_size=32,
+			color_mode="rgb",
+			class_mode="categorical",
+			target_size=(48, 48),
+			batch_size=32
 		)
-		'''
-		for xtrain, ytrain in train_gen:
-			train_tensor_neck = self.bottleneck_model.predict(xtrain)
+		for xtrain, ytrain in train_flow:
+			train_tensor_neck = self.bottleneck_model.predict(train)
 			train_labels = ytrain
 
-
-
+		'''
+		
 
 
 		if not os.path.exists(self.bottleneck_train_path):
@@ -281,7 +358,7 @@ class LipReading(object):
 		self.bottleneck_model.summary()
 		plot_model(self.bottleneck_model, to_file='bottleneck_model_plot.png', show_shapes=True, show_layer_names=True)
 
-	def create_model(wordCount, ne, msl, bs, lr, dp):
+	def create_model(self,wordCount, ne, msl, bs, lr, dp):
 
 
 		np.random.seed(0)
@@ -315,9 +392,11 @@ class LipReading(object):
 		#self.plot_confusion_matrix(self.y_test, y_pred,  title='Confusion matrix, without normalization')
 		self.model.summary()
 		plot_model(self.model, to_file='model_plot.png', show_shapes=True, show_layer_names=True)
-		history = self.model.fit(self.train_data, self.one_hot_labels_train, epochs=ne, batch_size=bs,validation_data=(self.val_data, self.one_hot_labels_val),callbacks=[csv_logger])
-		create_save_plots(history)
-		evaluate_model(model,self.test_data, self.y_test_one_hot_label,self.val_data,self.y_val_one_hot_label)
+	#	history = self.model.fit(self.train_data, self.one_hot_labels_train, epochs=ne, batch_size=bs,validation_data=(self.val_data, self.one_hot_labels_val),callbacks=[csv_logger])
+		history = self.model.fit(self.train_data, self.y_train_one_hot_label, epochs=ne, batch_size=bs,validation_data=(self.val_data, self.y_val_one_hot_label),callbacks=[csv_logger])
+		self.create_save_plots(history)
+	#	self.evaluate_model(self.model,self.test_data, self.y_test_one_hot_label,self.val_data,self.y_val_one_hot_label)
+		self.evaluate_model()
 
 	def run_task(self):
 		getFolderNamesInRootDir()
@@ -364,9 +443,115 @@ class LipReading(object):
 				for lr in learning_rates:
 					for dp in dropout_:
 						print("Epochs: {0} Batch Size:{1}  Learning Rate: {2} Dropout {3}".format(ne, bs, lr, dp))
-						self.create_model (wordCount,ne,29, bs, lr, dp,train_data,test_data,val_data, y_train,y_test,y_val,y_train_one_hot_label,y_test_one_hot_label,y_val_one_hot_label,iteration)
+						self.create_model (wordCount,ne,29, bs, lr, dp)
 	
+	# Walk into directories in filesystem
+	# Ripped from os module and slightly modified
+	# for alphabetical sorting
+	#
+	def sortedWalk(self, top, topdown=True, onerror=None):
+		from os.path import join, isdir, islink
 
+		names = os.listdir(top)
+		names.sort()
+		dirs, nondirs = [], []
+
+		for name in names:
+			if isdir(os.path.join(top, name)):
+				dirs.append(name)
+			else:
+				nondirs.append(name)
+
+		if topdown:
+			yield top, dirs, nondirs
+		for name in dirs:
+			path = join(top, name)
+			if not os.path.islink(path):
+				for x in self.sortedWalk(path, topdown, onerror):
+					yield x
+		if not topdown:
+			yield top, dirs, nondirs
+
+	def getFolderNamesInRootDir(self):
+		
+
+		print('walk_dir = ' + self.walk_dir)
+
+		# If your current working directory may change during script execution, it's recommended to
+		# immediately convert program arguments to an absolute path. Then the variable root below will
+		# be an absolute path as well. Example:
+		# walk_dir = os.path.abspath(walk_dir)
+		print('walk_dir (absolute) = ' + os.path.abspath(self.walk_dir))
+
+		for root, subdirs, files in self.sortedWalk(self.walk_dir):
+			print('--\nroot = ' + root)
+			for subdir in sorted(subdirs):
+				print('\t- subdirectory ' + subdir)
+				self.wordArray.append(subdir)
+			break
+
+	def createFoldersForEveryWord(self):
+		for item in self.wordArray:
+			
+			Path("data/"+item).mkdir(parents=True, exist_ok=True)
+			Path("data/"+item+"/test").mkdir(parents=True, exist_ok=True)
+			Path("data/"+item+"/train").mkdir(parents=True, exist_ok=True)
+			Path("data/"+item+"/val").mkdir(parents=True, exist_ok=True)
+
+	def processVideos(self):
+		print('walk_dir = ' + self.walk_dir)
+		for item in self.wordArray:
+			if item >= 'EVENTS':
+				for subitem in self.datasets :
+					sourceDir = self.walk_dir +"/" +item + "/" +subitem
+					self.targetDir = "data" +"/" +item + "/" +subitem
+					for root, subdirs, files in self.sortedWalk(os.path.abspath(sourceDir)):
+							for file in files:
+								if file.endswith(".mp4"):
+									filepath = os.path.join(root, file)
+									print("processing : ", filepath)
+									print(re.findall('\d+', file[0:-4] ))
+									self.fileNum = int(re.findall('\d+', file[0:-4] )[0])
+									self.captureVideo(filepath,item)
+
+
+		# If your current working directory may change during script execution, it's recommended to
+		# immediately convert program arguments to an absolute path. Then the variable root below will
+		# be an absolute path as well. Example:
+		# walk_dir = os.path.abspath(walk_dir)
+		print('walk_dir (absolute) = ' + os.path.abspath(self.walk_dir))
+
+		for root, subdirs, files in self.sortedWalk(self.walk_dir):
+			print('--\nroot = ' + root)
+			for subdir in sorted(subdirs):
+				print('\t- subdirectory ' + subdir)
+				self.wordArray.append(subdir)
+			break
+	def captureVideo(self, videoFileName,word):
+		self.count = 0
+		vidcap = cv2.VideoCapture(videoFileName)
+		success,self.image = vidcap.read()
+		if success == True:
+			tmp_array = self.extract_mouth_data()
+			while success:
+				
+				success,self.image = vidcap.read()
+				if success == True:
+					#print('Read a new frame: ', success)
+					tmp_array = self.extract_mouth_data()
+
+		xml =  dicttoxml(self.video_dict, custom_root='test', attr_type=False)
+		#xmltodict()
+		filename = "{}/d_{}_{:05d}.hgk".format(self.targetDir, word,self.fileNum)
+		#print(xml)
+
+		print ("size1: ", sys.getsizeof(xml))
+		xmlz = zlib.compress(xml)
+		print ("size2: ", sys.getsizeof(xmlz))
+		f = open(filename, 'wb')
+		f.write(xmlz)
+		f.close()
+		logging.error("Saved file " +filename )
 if __name__ == '__main__':
 	lr = LipReading()
 	lr.run_task()

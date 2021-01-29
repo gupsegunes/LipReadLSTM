@@ -6,9 +6,10 @@ import os
 
 walk_dir = "../lip_reading/data"
 wordArray = []
-words =['ABOUT','ABSOLUTELY', 'ABUSE', 'ACCESS', 'ACCORDING']
+words =['ABSOLUTELY','BECOME','FINAL','INDEPENDENT','REFERANDUM']
 datasets = ['train','test','val']
 wordCount = 5
+imgSize = 48
 def getFolderNamesInRootDir():
 	print('walk_dir = ' + walk_dir)
 
@@ -50,7 +51,7 @@ def sortedWalk(top, topdown=True, onerror=None):
 
 def data_generator():
 	getFolderNamesInRootDir()
-	val = np.zeros(shape=(48 ,48,3))
+	val = np.zeros(shape=(imgSize ,imgSize,3))
 	k_train = 0
 	k_test = 0
 	k_val = 0
@@ -75,10 +76,10 @@ def data_generator():
 	#	y_val = np.zeros((wordCount*50, 1))
 	y_val=[]
 	print('walk_dir = ' + walk_dir)
-	temp = np.zeros((29,48,48,3))
+	temp = np.zeros((29,imgSize,imgSize,3))
 	i = 0
 	for item in wordArray:
-		'''
+		'''	
 		if i ==  wordCount :
 			break
 		i = i+1
@@ -87,7 +88,7 @@ def data_generator():
 			break
 		if item != words[i]:
 			continue
-
+		
 		i = i+1
 		#index = 1
 		for subitem in datasets :
@@ -97,7 +98,7 @@ def data_generator():
 			for root, subdirs, files in sortedWalk(os.path.abspath(sourceDir)):
 					
 					for file in files:
-						if file.endswith(".jpg"):
+						if file.endswith(".jpg") and file.startswith("mouth"):
 							
 							filepath = os.path.join(root, file)
 							print("processing : ", filepath)
@@ -127,7 +128,7 @@ def data_generator():
 									#	y_val[k_val]= wordArray.index(item)
 									y_val.append(item)
 									k_val = k_val+1
-								temp = np.zeros((29,48,48,3))
+								temp = np.zeros((29,imgSize,imgSize,3))
 								#temp = np.zeros((29,48,48))
 								temp[int(file[12:-4])]= img
 
